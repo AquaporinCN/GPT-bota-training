@@ -1,0 +1,215 @@
+EXP4作业
+
+介绍
+　　g:Profiler是一种广泛使用的基因列表功能分析和名称空间转换工具集，自2007年以来就一
+直有助于可重复的生物数据分析。该包提供了一个易于使用的功能，使研究人员能够将功能浓缩
+分析合并到用r编写的自动分析管道中。该包还实现了交互式可视化方法，以帮助解释浓缩结果，
+并为出版物说明。g:Profiler提供了通用的基因/蛋白质标识符转换功能，使其能够在数百种不同
+的标识符类型或同源物种之间进行映射。
+　　g:GOSt进行功能富集分析，也称为过度表征分析（ORA）或基因集富集分析， 在输入基因
+列表中。它将基因映射到已知的功能信息源并进行统计检测 显著丰富了术语。我们定期从
+Ensembl数据库和真菌、植物或后生动物中检索数据Ensembl Genomes的特定版本，以及来自
+WormBase ParaSite的寄生虫特定数据。另外 到基因本体，我们包括来自KEGGReactome和
+WikiPathways的途径;来自miRTarBase的miRNA靶标和来自TRANSFAC的调控基序匹配;来自
+人类蛋白质图谱的组织特异性; 来自CORUM的蛋白质复合物和来自人类表型本体的人类疾病
+表型。g:GOSt 支持近 500 种生物体，并接受数百种标识符类型。
+　　在gprofiler2中有四个主要的API包装功能：
+　　gost：以进行功能富集分析
+　　gconvert：用于映射不同名称空间之间的基因标识符
+　　gorth：用于跨物种定位同源基因
+　　gsnpense：用于将SNPrs-id定位到染色体位置、基因和变异效应。
+　　gost函数中的几个附加参数有助于根据特定的需求进行分析，包括自定义的统计选项，
+如背景定义、统计显著性阈值、多重测试校正的方法和代表性不足的测试。此外，还有其他
+信息，如GO证据代码和基因，属于输入列表和功能项之间的交集。
+　　基因列表的解释是许多生物数据分析工作流程中的关键步骤，如差异基因表达分析和
+RNA-seq或微阵列数据的共表达聚类。通常，这涉及到将这些基因列表与以前来自生物过程
+和途径的精心策划的数据来源的知识联系起来。
+　　
+具体操作代码及结果：
+install.packages("gprofiler2")
+install.packages("DESeq2")
+install.packages("airway")
+
+BiocManager::install('DESeq2')
+
+gostres = gost(query = c("X:1000:1000000", "rs17396340", "GO:0005005",
+                         "ENSG00000156103", "NLRP1", "3837"),
+               organism = "hsapiens",
+               numeric_ns = "ENTREZGENE_ACC")
+
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+BiocManager::install("airway")
+library(DESeq2)
+library(airway)
+library(gprofiler2)
+
+data(airway)
+ddsMat = DESeqDataSetFromMatrix(countData = assay(airway),
+                                colData = colData(airway),
+                                design = ~ cell + dex)
+# run DESeq2 pipeline
+dds = DESeq(ddsMat)
+# get the results
+results = results(dds, contrast = c("dex", "trt", "untrt"),
+                  alpha = 0.05, lfcThreshold = 1)
+# keep only the significant genes
+results_sig = subset(results, padj < 0.05)
+# get the significant up-regulated genes
+up = subset(results_sig, log2FoldChange > 0)
+# get the significant down-regulated genes
+down = subset(results_sig, log2FoldChange < 0)
+
+# enrichment analysis
+gp_up = gost(row.names(up), organism = "hsapiens")
+gp_down = gost(row.names(down), organism = "hsapiens")
+
+
+
+
+# order genes by log2FC
+up_ordered = up[order(up$log2FoldChange, decreasing = TRUE),]
+# ordered enrichment analysis
+gp_up_ordered = gost(row.names(up_ordered), organism = "hsapiens", 
+　　　　　　　　　ordered_query = TRUE)
+
+
+gostplot(gp_up, interactive = TRUE)
+p1 = gostplot(gp_up, interactive = FALSE)
+publish_gostplot(p1, highlight_terms = c("GO:0050896", "KEGG:04978",
+                                         "REAC:R-HSA-5661231", "WP:WP3286"))
+Figure 1. Manhattan plot of g:Profiler enrichment results.
+
+multi_gp = gost(list("up-regulated" = row.names(up),
+                     "down-regulated" = row.names(down)))
+p2 = gostplot(multi_gp, interactive = FALSE)
+publish_gostplot(p2, highlight_terms = c("GO:0099699", "GO:0050896", "KEGG:04978",
+ "REAC:R-HSA-5661231", "WP:WP3286", "GO:1990169"))
+Figure 2. Visualisation of g:Profiler enrichment results to compare multiple gene lists.
+
+multi_gp_link= gost(list("up-regulated" = row.names(up),
+                          "down-regulated" = row.names(down)), as_short_link = TRUE)
+
+results_genes = gconvert(row.names(results), organism = "hsapiens",
+                         target = "ENTREZGENE_ACC", filter_na = FALSE)
+
+results_df = as.data.frame(results)
+results_df$Ensembl_id = row.names(results_df)
+results_df = results_df[order(results_df$padj),]
+
+# add the gene names
+results_df = merge(results_df,
+                   results_genes[,c("input", "target", "name","description")],
+                   by.x = "Ensembl_id", by.y = "input")
+# save the results to a tsv file
+write.table(results_df, file = "DESeq2_results.tsv", sep = "\t",
+            quote = F, row.names = F)
+
+# download the GMT file from DisGeNET
+gmturl = file.path("http://www.disgenet.org",
+                   "static/disgenet_ap1/files/downloads/gmt_files", 
+                   "disgenet.curated.v7.symbols.gmt")
+download.file(url = gmturl, destfile = "DisGeNET.gmt")
+
+token = upload_GMT_file(gmtfile = "DisGeNET.gmt")
+# save this token to your notes for enrichment analysis
+
+up_names = gconvert(row.names(up))
+down_names = gconvert(row.names(down))
+custom_gp = gost(list("up-regulated" = up_names$name,
+                      "down-regulated" = down_names$name),
+                 organism = "gp__goJy_Ej2J_rPc")
+p = gostplot(custom_gp, interactive = FALSE, pal = list("DisGeNET" = "salmon"))
+pp = publish_gostplot(p, highlight_terms = c("C0011603", "C0014175"))
+
+ 
+Figure 3. Manhattan plot of g:Profiler enrichment results using DisGeNET database loaded from a custom 
+GMT file.
+
+mouse_genes = gorth(row.names(up), source_organism = "hsapiens", 
+target_organism = "mmusculus") 
+
+
+
+
+BiocManager::install(c("clusterProfiler", "enrichplot", "DOSE"))
+a
+library(clusterProfiler)
+library(enrichplot)
+library(DOSE)
+
+up_names = gconvert(row.names(up))
+down_names = gconvert(row.names(down))
+
+# enrichment analysis using gene names
+multi_gp = gost(list("up-regulated" = up_names$name,
+                     "down-regulated" = down_names$name), multi_query = FALSE, 
+evcodes = TRUE)
+# modify the g:Profiler data frame
+gp_mod = multi_gp$result[,c("query", "source", "term_id",
+                            "term_name", "p_value", "query_size", 
+                            "intersection_size", "term_size", 
+                            "effective_domain_size", "intersection")]
+gp_mod$GeneRatio = paste0(gp_mod$intersection_size, "/", gp_mod$query_size)
+
+# modify the g:Profiler data frame
+gp_mod = multi_gp$result[,c("query", "source", "term_id",
+                            "term_name", "p_value", "query_size", 
+                            "intersection_size", "term_size", 
+                            "effective_domain_size", "intersection")]
+gp_mod$GeneRatio = paste0(gp_mod$intersection_size, "/", gp_mod$query_size)
+
+names(gp_mod) = c("Cluster", "Category", "ID", "Description", "p.adjust", 
+                  "query_size", "Count", "term_size", "effective_domain_size", 
+                  "geneID", "GeneRatio", "BgRatio") 
+
+gp_mod$geneID = gsub(",", "/", gp_mod$geneID)
+row.names(gp_mod) = gp_mod$ID
+#不允许有重复的'row.names'，删掉此句
+
+# define as compareClusterResult object
+gp_mod_cluster = new("compareClusterResult", compareClusterResult = gp_mod)
+# define as enrichResult object
+gp_mod_enrich = new("enrichResult", result = gp_mod)
+enrichplot::dotplot(gp_mod_cluster)
+
+Figure 4. Dot plot of g:Profiler enrichment results using enrichplot.
+
+#Figure4与原文差距较大
+
+#此处front.size过大，图中文字重合，将其改为4
+barplot(gp_mod_enrich, showCategory = 40, font.size = 4) +
+  ggplot2::facet_grid(~Cluster) +
+  ggplot2::ylab("Intersection size")
+Figure 5. Bar plots of g:Profiler enrichment results using enrichplot.
+#此处只做出了下调的图像，未显示上调
+gp_mod$ID[gp_mod$Category=="KEGG"] = gsub("KEGG:", "hsa",
+                                          gp_mod$ID[gp_mod$Category=="KEGG"], 
+"")
+row.names(gp_mod) = gp_mod$ID
+#不允许有重复的'row.names'，删掉此句
+
+# define as enrichResult object
+gp_mod_enrich = new("enrichResult", result = gp_mod)
+clusterProfiler::browseKEGG(gp_mod_enrich, pathID = "hsa04750")
+
+gostres = gost(query = list("up-regulated" = row.names(up)),
+               evcodes = TRUE, multi_query = FALSE,
+               sources = c("GO", "REAC", "MIRNA", "CORUM", "HP", "HPA", "WP"))
+gem = gostres$result[,c("term_id", "term_name", "p_value", "intersection")]
+colnames(gem) = c("GO.ID", "Description", "p.Val", "Genes")
+#运行结果为下图网页
+
+gem$FDR = gem$p.Val
+gem$Phenotype = "+1"
+gem = gem[,c("GO.ID", "Description", "p.Val", "FDR", "Phenotype", "Genes")]
+# saving the GEM file
+write.table(gem, file = "gProfiler_gem.txt", sep = "\t", quote = F, row.names = F)
+
+
+# get g:Profiler version
+multi_gp$meta$version
+set_base_url("http://biit.cs.ut.ee/gprofiler_archive3/e99_eg46_p14")
+set_base_url("http://biit.cs.ut.ee/gprofiler_beta")
+get_base_url()
+
+
